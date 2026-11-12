@@ -303,6 +303,7 @@ const macos_fast = [_][]const u8{
     "test-qwen27-prompt-floor-host",
     "test-qwen27-reply-cache-host",
     "test-qwen27-startup-host",
+    "test-sam3",
 };
 
 const macos_lanes = [_][]const u8{
