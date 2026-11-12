@@ -57,6 +57,7 @@ pub const all_metal = @import("sam3_records.zig").metal ++
     @import("metal_pair_records.zig").records ++
     @import("glm_rows_records.zig").records ++
     @import("weight_only_records.zig").metal ++
+    @import("grouped_records.zig").metal ++
     @import("hc_activation_records.zig").metal ++
     @import("qwen4_records.zig").metal ++
     @import("lfm2_records.zig").records ++

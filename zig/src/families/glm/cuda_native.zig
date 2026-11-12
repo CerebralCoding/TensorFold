@@ -145,14 +145,15 @@ fn checked(p: Place) !Place {
     return p;
 }
 
-/// Bytes this rank's weights take at most, for the server's admission: the checkpoint times its largest axis share.
-pub fn weightShare(a: std.mem.Allocator, io: std.Io, dir: []const u8, total: u64) u64 {
+/// Bytes this rank's weights take at most: the checkpoint (TF_GLM_LAYERS: the tensors read) times its largest share.
+pub fn weightShare(a: std.mem.Allocator, io: std.Io, dir: []const u8, total: u64, drafts: bool) u64 {
     const p = place() catch return total;
     const path = std.fs.path.join(a, &.{ dir, "config.json" }) catch return total;
     const text = std.Io.Dir.cwd().readFileAlloc(io, path, a, .limited(1 << 24)) catch return total;
     const c = config.parse(a, text) catch return total;
     const f = (shard.Share.of(&c, p.rank, p.world) catch return total).part(&c);
-    return @intCast(@as(u128, total) * f[0] / f[1]);
+    const whole = @import("cuda_thin_bytes.zig").count(a, io, dir, total, ranks.environment("TF_GLM_LAYERS"), c.layers, drafts and c.mtp > 0);
+    return @intCast(@as(u128, whole) * f[0] / f[1]);
 }
 
 /// Slots for `context` plus a verify window, a multiple of 64 so the sparse pool keeps the AOT set.
@@ -323,11 +324,12 @@ fn finishRank(a: OpenArgs) !Loaded {
         if (!o.drafts) return error.DrafterNeedsDrafts;
         own.e.drafter = try dflash_load.load(gpa, io, own.e, dd, p.rank, p.world, o.drafter_bits);
     }
-    try own.group.openRoce(gpa, io, ctx.d, own.e.stream, roce_bytes); // both ranks bring it up or neither does
+    // the group's own RoCE path (every rank or none), unless TF_GLM_ROCE_MULTI=1 lends fabric/tp's wire
+    if (ranks.ownRoce(set, p.world)) try own.group.openRoce(gpa, io, ctx.d, own.e.stream, roce_bytes);
     errdefer if (own.group.fast) |f| f.deinit();
     try @import("cuda_roce_multi.zig").open(gpa, io, ctx.d, &own.group, set.roce_multi); // three ranks or more, likewise
     errdefer if (own.group.multi) |m| m.deinit(m.ctx);
-    own.e.group = &own.group;
+    own.e.installGroup(&own.group);
     own.link = try follow.Link.init(gpa, ctx.d, &own.group.lib, own.group.comm, own.e.stream, try linkCapacity(cap, o.vision));
     errdefer own.link.deinit();
     own.e.snap_setup = .{ .ptr = own, .run = readySnapshots };
